@@ -1,0 +1,84 @@
+version: "3.3"
+services:
+
+
+    s3:
+        image: minio/minio:latest
+        container_name: minio
+        ports:
+            - "9000:9000"
+            - "9001:9001"
+        volumes:
+            - ./storage:/data
+        env_file:
+            - .env
+        command: minio server --console-address :9001 /data
+
+    airflow-master:
+        build:
+            context: .
+        ports:
+            - "8000:8000"
+            - "5555:5555"
+        env_file:
+            - .env
+        volumes:
+            - ./dags:/home/airflow/dags
+            - ./core:/home/airflow/dags/core
+            - ./jars:/home/airflow/dags/jars
+        depends_on:
+            - postgresql
+            - redis
+
+        environment:
+            MINIO_URL: s3:9000
+
+    airflow-worker:
+        build:
+            context: .
+        entrypoint: airflow celery worker
+        env_file:
+            - .env
+        volumes:
+            - ./dags:/home/airflow/dags
+            - ./core:/home/airflow/dags/core
+            - ./jars:/home/airflow/dags/jars
+        depends_on:
+            - airflow-master
+        environment:
+            MINIO_URL: s3:9000
+
+    postgresql:
+        build: db
+        volumes:
+            - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+        ports:
+            - "5432:5432"
+        env_file:
+            - .env
+        environment:
+            POSTGRESQL: postgresql:5432
+
+    redis:
+        image: redis:6-alpine
+        ports:
+            - "6379:6379"
+
+    spark-master:
+            image: bitnami/spark:3.3.0
+            hostname: spark-master
+            ports:
+                - "8080:8080"
+                - "7077:7077"
+            environment:
+                SPARK_MODE: master
+
+    spark-worker:
+            image: bitnami/spark:3.3.0
+            depends_on:
+                - spark-master
+            ports:
+                - "8081:8081"
+            environment:
+                SPARK_MODE: worker
+                SPARK_MASTER: spark://spark-master:7077
